@@ -1,0 +1,258 @@
+#include <LiquidCrystal.h>
+#include <Wire.h>
+#include "rgb_lcd.h"
+#include <math.h>
+
+
+//écran bleu pour la barre
+const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2, ct = 9;
+LiquidCrystal mylcd(rs, en, d4, d5, d6, d7);
+
+
+//écran vert pour la temperature et le smiley
+rgb_lcd lcdTemp;
+
+
+
+
+unsigned long derniertemps = 0;
+bool clignement = true;
+int temperature = 5;
+const int minval = 0;
+const int maxval = 40;
+
+
+// Barres de progression (0 à 4)
+byte progressionbarre[5][8] = {
+ {B00000, B00000, B00000, B00000, B00000, B00000, B00000, B00000},
+ {B00001, B00001, B00001, B00001, B00001, B00001, B00001, B00001},
+ {B00011, B00011, B00011, B00011, B00011, B00011, B00011, B00011},
+ {B00111, B00111, B00111, B00111, B00111, B00111, B00111, B00111},
+ {B11111, B11111, B11111, B11111, B11111, B11111, B11111, B11111}
+};
+
+
+// Grands chiffres (haut/bas)
+byte chiffreshaut[10][8] = {
+ {B01111, B10000, B10000, B10000, B10000, B10000, B10000, B01111},
+ {B00000, B00000, B11111, B10000, B01000, B00100, B00010, B00000},
+ {B01000, B10100, B10010, B10001, B10000, B10000, B10000, B01000},
+ {B01110, B10001, B10001, B10001, B10000, B10000, B10000, B01000},
+ {B00000, B11111, B01000, B00100, B00010, B00001, B00000, B00000},
+ {B10000, B10001, B10001, B10001, B10001, B10001, B10001, B11110},
+ {B01000, B10001, B10001, B10001, B10001, B10001, B10001, B01111},
+ {B01000, B10100, B10010, B10001, B10000, B10000, B10000, B10000},
+ {B01110, B10001, B10001, B10001, B10001, B10001, B10001, B01110},
+ {B01111, B10001, B10001, B10001, B10001, B10001, B10001, B01110}
+};
+
+
+byte chiffresbas[10][8] = {
+ {B11110, B00001, B00001, B00001, B00001, B00001, B00001, B11110},
+ {B00001, B00001, B11111, B00001, B00001, B00000, B00000, B00000},
+ {B00010, B00001, B00001, B00001, B00001, B10001, B01001, B00110},
+ {B11110, B00001, B00001, B00001, B00001, B00001, B00001, B00010},
+ {B10000, B11111, B10000, B10000, B10000, B10000, B10000, B00000},
+ {B11110, B00001, B00001, B00001, B00001, B00001, B00001, B00001},
+ {B11110, B00001, B00001, B00001, B00001, B00001, B00001, B11110},
+ {B00000, B00000, B00000, B00000, B11111, B00000, B00000, B00000},
+ {B11110, B00001, B00001, B00001, B00001, B00001, B00001, B11110},
+ {B11110, B00001, B00001, B00001, B00001, B00001, B00001, B00010}
+};
+
+
+byte smileyferme[8] = {B00000,B00010,B00100,B00100,B00100,B00100,B00010,B00000};
+byte smileynormal[8]  = {B00000,B00100,B00100,B00100,B00111,B00111,B00100,B00000};
+
+
+
+
+byte smileyhereuxd[8] = {B01110,B01110,B01110,B01100,B11000,B00000,B00000,B00000};
+byte smileyhereuxg[8] = {B00000,B00000,B00000,B11000,B01100,B01110,B01110,B01110};
+
+
+
+
+byte smileytristed[8] = {B01100,B01100,B00110,B00011,B00000,B00000,B00000,B00000};
+byte smileytristeg[8] = {B00000,B00000,B00000,B00000,B00011,B00110,B01100,B01100};
+
+
+
+
+byte smileynormald[8] = {B00110,B00110,B00000,B00000,B00000,B00000,B00000,B00000};
+byte smileynormalg[8] = {B00000,B00000,B00000,B00000,B00000,B00000,B00110,B00110};
+
+
+// Symbole degré
+byte symboledegre[8] = {B00110,B01001,B01001,B00110,B00000,B00000,B00000,B00000};
+
+
+void setup() {
+ Serial.begin(9600);
+  // Initialisation LCD barre
+ mylcd.begin(16, 2);
+ analogWrite(ct, 50); // Contraste
+  // Initialisation LCD température
+ lcdTemp.begin(16, 2);
+
+
+ // Création des caractères personnalisés
+ for (int i = 0; i < 5; i++) {
+   mylcd.createChar(i, progressionbarre[i]);
+ }
+ lcdTemp.createChar(4, symboledegre);
+
+
+ // Effacement des écrans
+ mylcd.clear();
+ lcdTemp.clear();
+}
+
+
+void afficherBarre(int valeur) {
+ static unsigned long lastUpdate = 0;
+ const long updateInterval = 500; // ms
+  // Limiter la fréquence de rafraîchissement
+ if (millis() - lastUpdate < updateInterval) {
+   return;
+ }
+ lastUpdate = millis();
+
+
+ // Calcul des segments (16 colonnes × 4 = 64 segments max)
+ int segments = map(constrain(valeur, minval, maxval), minval, maxval, 0, 64);
+  // Parcourir les colonnes de droite à gauche (15 à 0)
+ for (int col = 15; col >= 0; col--) {
+   int segmentsCol = segments - (15 - col) * 4;
+   segmentsCol = constrain(segmentsCol, 0, 4);
+  
+   for (int ligne = 0; ligne < 2; ligne++) {
+     mylcd.setCursor(col, ligne);
+     if (segmentsCol >= 4) {
+       mylcd.write(4);  // Barre pleine
+     } else if (segmentsCol > 0) {
+       mylcd.write(segmentsCol);  // Barre partielle
+     } else {
+       mylcd.write(' ');  // Vide
+     }
+   }
+ }
+}
+
+
+void affichagetempvert(int t) {
+ static int tempmax = -100; // Valeur impossible pour forcer le premier affichage
+ static unsigned long nouvelleinfo = 0;
+ const long temps = 500; // ms
+  // Vérifier si la température a changé ou si c'est le temps de rafraîchir
+ if (t == tempmax && (millis() - nouvelleinfo < temps)) {
+   return;
+ }
+ tempmax = t;
+ nouvelleinfo = millis();
+
+
+ int dizaine = t / 10;
+ int unite = t % 10;
+
+
+ // Création des caractères personnalisés
+ lcdTemp.createChar(0, chiffreshaut[unite]);    // Unité en haut
+ lcdTemp.createChar(1, chiffresbas[unite]);     // Unité en bas
+ lcdTemp.createChar(2, chiffreshaut[dizaine]);  // Dizaine en haut
+ lcdTemp.createChar(3, chiffresbas[dizaine]);   // Dizaine en bas
+
+
+ // Affichage
+ lcdTemp.setCursor(0, 0);
+ lcdTemp.write((byte)0);  // Dizaine (haut)
+ lcdTemp.setCursor(1, 0);
+ lcdTemp.write((byte)1);  // Dizaine (bas)
+ lcdTemp.setCursor(0, 1);
+ lcdTemp.write((byte)2);  // Unité (haut)
+ lcdTemp.setCursor(1, 1);
+ lcdTemp.write((byte)3);  // Unité (bas)
+  // Symbole degré et unité
+ lcdTemp.setCursor(2, 0);
+ lcdTemp.write((byte)4);
+ lcdTemp.setCursor(3, 0);
+ lcdTemp.write('C');
+}
+void afficherSmiley(int t) {
+ lcdTemp.setCursor(12, 0);
+ lcdTemp.write((byte)7);
+
+
+ lcdTemp.setCursor(12, 1);
+ lcdTemp.write((byte)7);
+
+
+ if (t < 14 || t > 28) {
+ // Tristesse : température très basse ou très haute
+ lcdTemp.createChar(6, smileytristeg);
+ lcdTemp.createChar(5, smileytristed);
+ } else if ((t >= 14 && t < 17) || (t >= 26 && t <= 28)) {
+ // normal : température un peu basse ou un peu trop chaude
+ lcdTemp.createChar(6, smileynormalg);
+ lcdTemp.createChar(5, smileynormald);
+ } else {
+ // Heureux : température idéale
+ lcdTemp.createChar(6, smileyhereuxg);
+ lcdTemp.createChar(5, smileyhereuxd);
+ }
+
+
+
+
+ // Affichage géant colonne 12 à 15
+ lcdTemp.setCursor(13, 0);
+  lcdTemp.write((byte)6);
+
+
+ lcdTemp.setCursor(13, 1);
+  lcdTemp.write((byte)5);
+ }
+//PARTIE TEMPERATURE
+void loop() {
+ const float T0 = 42.5 + 273.15;
+ const float RT0 = 22000.0;
+ const float R0 = 22000.0;
+ const float B = 4200.0;
+
+
+ // Lecture température
+ int valeurAnalogique = analogRead(A0);
+ float tension = valeurAnalogique * (5.0 / 1023.0);
+ float T = (tension - 0.7775) / 0.0352;
+  temperature = int(T);
+
+
+ //Affichage sur monieur ordi
+ Serial.print("Tension sur A0 : ");
+ Serial.print(tension, 2);
+ Serial.print(" V -> Température : ");
+ Serial.print(T, 1);
+ Serial.println(" °C");
+
+
+  // Affichage sur écran arduino
+ affichagetempvert(temperature);
+ afficherBarre(temperature);
+ afficherSmiley(temperature);
+  if (millis() - derniertemps >= 300) {
+   clignement = !clignement;
+
+
+   if (clignement) {
+     lcdTemp.createChar(7, smileynormal);
+     delay(3000);
+   } else {
+     lcdTemp.createChar(7, smileyferme);
+   }
+
+
+   derniertemps = millis();
+ }
+
+
+ delay(100);
